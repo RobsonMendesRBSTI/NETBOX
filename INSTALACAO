@@ -1,0 +1,120 @@
+- apt-get -q -y update
+- apt-get -q -y upgrade
+- apt-get -q -y install gnupg2
+- apt-get -q -y install wget htop
+- timedatectl
+- timedatectl set-timezone America/Sao_Paulo
+- apt-get -y update
+- apt-get -y install ntpdate
+- /sbin/ntpdate a.ntp.br
+  # PARA EVITAR ERRO DE PATH
+- export PATH=$PATH:/usr/local/sbin:/usr/sbin:/sbin
+
+- apt install vim net-tools wget redis-server supervisor\
+  postgresql-contrib postgresql libpq-dev gcc\
+  python-minimal python3 python3-pip python3-venv\
+  python3-dev build-essential libxml2-dev libxslt1-dev\
+  libffi-dev libssl-dev zlib1g-dev graphviz\
+  nginx redis python3-setuptools
+
+CRIAR BANCO DE DADOS
+- su -postgres
+- psql
+- CREATE DATABASE netboxdb;
+- CREATE USER netboxuser WITH PASSWORD 'senha';
+- GRANT ALL PRIVILEGES ON DATABASE netboxdb TO netboxuser;
+- exit
+
+VERIFICAR SE O SERVICO REDIS ESTA RODANDO
+
+- pip3 install --upgrade pip
+
+BAIXAR O NETBOX
+
+- cd /tmp
+- wget https://github.com/netbox-community/netbox/archive/refs/tags/v2.10.8.tar.gz
+- tar vxf v2.10.8.tar.gz
+- mv netbox*/ /opt/netbox
+- cd /opt/netbox/
+- chown www-data. /opt/netbox/netbox/media/ -R
+
+GERAR CHAVE
+
+-  /opt/netbox/netbox/generate_secret_key.py 
+
+COPIAR ARQUIVO DE CONFIGURACAO
+
+- cp /opt/netbox/netbox/netbox/configuration.example.py /opt/netbox/netbox/netbox/configuration.py
+
+EDITAR ARQUIVO DE CONFIGURACAO
+
+- nano /opt/netbox/netbox/netbox/configuration.py
+  ALLOWED_HOSTS = ['localhost','netbox.remontti.com.br']
+ 
+  DATABASE = {
+    'NAME': 'netboxdb',       # Database name
+    'USER': 'netboxuser',     # PostgreSQL username
+    'PASSWORD': 'senha',      # PostgreSQL password
+    'HOST': 'localhost',      # Database server
+    'PORT': '',               # Database port (leave blank for default)
+    'CONN_MAX_AGE': 300,      # Max database connection age
+  }
+  # Gerado com o comando /opt/netbox/netbox/generate_secret_key.py
+  SECRET_KEY = 'T7TE07O$j^Jqf9(*20q8M5kG4%NBIci#gEEn0$wuw*qodT7Lfo'
+ 
+  LOGIN_REQUIRED = True
+
+
+INSTALAR PACOTES REQUIRIDOS
+
+- pip3 install -r /opt/netbox/requirements.txt
+
+INSTALAR NETBOX
+
+- cd /opt/netbox/netbox/
+- python3 manage.py migrate
+
+CRIAR USUARIO WEB
+
+- python3 manage.py createsuperuser 
+- python3 manage.py collectstatic
+
+- pip3 install gunicorn
+ 
+# cat <<EOF | tee /opt/netbox/gunicorn_config.py
+command = '/usr/local/bin/gunicorn'
+pythonpath = '/opt/netbox/netbox'
+bind = '127.0.0.1:8001'
+workers = 3
+user = 'www-data'
+EOF
+ 
+# cat <<EOF | tee /etc/supervisor/conf.d/netbox.conf
+[program:netbox]
+command = gunicorn -c /opt/netbox/gunicorn_config.py netbox.wsgi
+directory = /opt/netbox/netbox/
+user = www-data
+EOF
+ 
+- systemctl restart supervisor
+
+- rm /etc/nginx/sites-enabled/default
+- nano  /etc/nginx/sites-available/netbox.conf
+    server {
+    listen 80;
+    server_name 192.168.0.2;
+    client_max_body_size 25m;
+ 
+    location /static/ {
+        alias /opt/netbox/netbox/static/;
+    }
+ 
+    location / {
+        proxy_pass http://localhost:8001;
+    }
+}
+
+- sed -i 's/# server_tokens/server_tokens/' /etc/nginx/nginx.conf
+- nginx -t
+- ln -s /etc/nginx/sites-available/netbox.conf /etc/nginx/sites-enabled/
+- /etc/init.d/nginx restart
