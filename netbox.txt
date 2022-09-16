@@ -1,0 +1,289 @@
+		============
+		|--NETBOX--|
+		============
+
+--------------------------------------------------------------------
+PostgreSQL Database Installation
+--------------------------------------------------------------------
+
+Installation
+
+apt update
+apt install -y postgresql
+systemctl start postgresql
+systemctl enable postgresql
+systemctl status postgresql
+psql -V
+
+--------------------------------------------------------------------
+Database Creation
+--------------------------------------------------------------------
+
+su -c /usr/bin/psql postgres
+
+CREATE DATABASE netbox;
+CREATE USER netbox WITH PASSWORD 'senha_forte';
+GRANT ALL PRIVILEGES ON DATABASE netbox TO netbox;
+
+OBS: DON'T FORGET THE ; AT FINAL LINE.
+
+\q to exit the PostgreSQL shell.
+
+Verify Service Status
+
+psql --username=netbox --password --host localhost netbox
+
+Exemple:
+
+Password for user netbox: 
+psql (12.5 (Ubuntu 12.5-0ubuntu0.20.04.1))
+SSL connection (protocol: TLSv1.3, cipher: TLS_AES_256_GCM_SHA384, bits: 256, compression: off)
+Type "help" for help.
+
+netbox=> \conninfo
+You are connected to database "netbox" as user "netbox" on host "localhost" (address "127.0.0.1") at port "5432".
+SSL connection (protocol: TLSv1.3, cipher: TLS_AES_256_GCM_SHA384, bits: 256, compression: off)
+netbox=> \q
+
+
+--------------------------------------------------------------------
+Redis Installation
+--------------------------------------------------------------------
+
+Install Redis
+
+apt install -y redis-server
+redis-server -v (at least v4.0)
+
+You may wish to modify the Redis configuration at /etc/redis.conf or 
+/etc/redis/redis.conf, however in most cases the default 
+configuration is sufficient.
+
+Verify Service Status
+
+redis-cli ping
+
+If successful, you should receive a PONG response from the server.
+
+--------------------------------------------------------------------
+NetBox Installation
+--------------------------------------------------------------------
+
+NetBox v3.2 requires Python 3.8, 3.9, or 3.10.
+
+apt install -y python3 python3-pip python3-venv python3-dev build-essential libxml2-dev libxslt1-dev libffi-dev libpq-dev libssl-dev zlib1g-dev
+
+python3 -V (version is at least 3.8)
+
+Download NetBox
+
+apt install -y git
+cd /opt/
+git clone -b master --depth 1 https://github.com/netbox-community/netbox.git
+
+
+The git clone command should generate output similar to the following:
+
+
+Cloning into '.'...
+remote: Enumerating objects: 996, done.
+remote: Counting objects: 100% (996/996), done.
+remote: Compressing objects: 100% (935/935), done.
+remote: Total 996 (delta 148), reused 386 (delta 34), pack-reused 0
+Receiving objects: 100% (996/996), 4.26 MiB | 9.81 MiB/s, done.
+Resolving deltas: 100% (148/148), done.
+
+--------------------------------------------------------------------
+Create the NetBox System User
+--------------------------------------------------------------------
+
+adduser --system --group netbox
+chown --recursive netbox /opt/netbox/netbox/media/
+
+Configuration
+Move into the NetBox configuration directory and make a copy of configuration_example.py named configuration.py. This file will hold all of your local configuration parameters.
+
+
+cd /opt/netbox/netbox/netbox/
+sudo cp configuration_example.py configuration.py
+Open configuration.py with your preferred editor to begin configuring NetBox. NetBox offers many configuration parameters, but only the following four are required for new installations:
+
+ALLOWED_HOSTS
+DATABASE
+REDIS
+SECRET_KEY
+ALLOWED_HOSTS
+This is a list of the valid hostnames and IP addresses by which this server can be reached. You must specify at least one name or IP address. (Note that this does not restrict the locations from which NetBox may be accessed: It is merely for HTTP host header validation.)
+
+
+ALLOWED_HOSTS = ['netbox.example.com', '192.0.2.123']
+If you are not yet sure what the domain name and/or IP address of the NetBox installation will be, you can set this to a wildcard (asterisk) to allow all host values:
+
+
+ALLOWED_HOSTS = ['*']
+DATABASE
+This parameter holds the database configuration details. You must define the username and password used when you configured PostgreSQL. If the service is running on a remote host, update the HOST and PORT parameters accordingly. See the configuration documentation for more detail on individual parameters.
+
+
+DATABASE = {
+    'NAME': 'netbox',               # Database name
+    'USER': 'netbox',               # PostgreSQL username
+    'PASSWORD': 'senha_forte',      # PostgreSQL password
+    'HOST': 'localhost',            # Database server
+    'PORT': '',                     # Database port (leave blank for default)
+    'CONN_MAX_AGE': 300,            # Max database connection age (seconds)
+}
+REDIS
+Redis is a in-memory key-value store used by NetBox for caching and background task queuing. Redis typically requires minimal configuration; the values below should suffice for most installations. See the configuration documentation for more detail on individual parameters.
+
+Note that NetBox requires the specification of two separate Redis databases: tasks and caching. These may both be provided by the same Redis service, however each should have a unique numeric database ID.
+
+
+REDIS = {
+    'tasks': {
+        'HOST': 'localhost',      # Redis server
+        'PORT': 6379,             # Redis port
+        'PASSWORD': '',           # Redis password (optional)
+        'DATABASE': 0,            # Database ID
+        'SSL': False,             # Use SSL (optional)
+    },
+    'caching': {
+        'HOST': 'localhost',
+        'PORT': 6379,
+        'PASSWORD': '',
+        'DATABASE': 1,            # Unique ID for second database
+        'SSL': False,
+    }
+}
+
+SECRET_KEY (INPUT THE SECRET KEY IN configuration.py)
+
+python3 ../generate_secret_key.py
+
+
+Optional Requirements
+All Python packages required by NetBox are listed in requirements.txt and will be installed automatically. NetBox also supports some optional packages. If desired, these packages must be listed in local_requirements.txt within the NetBox root directory.
+
+NAPALM
+Integration with the NAPALM automation library allows NetBox to fetch live data from devices and return it to a requester via its REST API. The NAPALM_USERNAME and NAPALM_PASSWORD configuration parameters define the credentials to be used when connecting to a device.
+
+
+sudo sh -c "echo 'napalm' >> /opt/netbox/local_requirements.txt"
+Remote File Storage
+By default, NetBox will use the local filesystem to store uploaded files. To use a remote filesystem, install the django-storages library and configure your desired storage backend in configuration.py.
+
+
+sudo sh -c "echo 'django-storages' >> /opt/netbox/local_requirements.txt"
+Run the Upgrade Script
+Once NetBox has been configured, we're ready to proceed with the actual installation. We'll run the packaged upgrade script (upgrade.sh) to perform the following actions:
+
+Create a Python virtual environment
+Installs all required Python packages
+Run database schema migrations
+Builds the documentation locally (for offline use)
+Aggregate static resource files on disk
+
+sudo /opt/netbox/upgrade.sh
+
+--------------------------------------------------------------------
+Create a Super User
+--------------------------------------------------------------------
+
+source /opt/netbox/venv/bin/activate
+
+Once the virtual environment has been activated, you should notice
+the string (venv) prepended to your console prompt.
+
+cd /opt/netbox/netbox
+python3 manage.py createsuperuser
+
+--------------------------------------------------------------------
+Schedule the Housekeeping Task
+--------------------------------------------------------------------
+
+ln -s /opt/netbox/contrib/netbox-housekeeping.sh /etc/cron.daily/netbox-housekeeping
+
+--------------------------------------------------------------------
+Test the Application
+--------------------------------------------------------------------
+
+Search in /opt/netbox for the directory contains manage.py na run the command
+python3 manage.py runserver 0.0.0.0:8000 --insecure
+
+If successful, you should see output similar to the following:
+
+
+Watching for file changes with StatReloader
+Performing system checks...
+
+System check identified no issues (0 silenced).
+August 30, 2021 - 18:02:23
+Django version 3.2.6, using settings 'netbox.settings'
+Starting development server at http://127.0.0.1:8000/
+Quit the server with CONTROL-C.
+
+Next, connect to the name or IP of the server (as defined in ALLOWED_HOSTS) on port 8000; for example, http://127.0.0.1:8000/.
+You should be greeted with the NetBox home page. 
+Try logging in using the username and password specified 
+when creating a superuser.
+
+--------------------------------------------------------------------
+Gunicorn
+--------------------------------------------------------------------
+
+cp /opt/netbox/contrib/gunicorn.py /opt/netbox/gunicorn.py
+
+systemd Setup
+
+cp -v /opt/netbox/contrib/*.service /etc/systemd/system/
+systemctl daemon-reload
+systemctl start netbox netbox-rq
+systemctl enable netbox netbox-rq
+systemctl status netbox.service
+
+You should see output similar to the following:
+
+
+● netbox.service - NetBox WSGI Service
+     Loaded: loaded (/etc/systemd/system/netbox.service; enabled; vendor preset: enabled)
+     Active: active (running) since Mon 2021-08-30 04:02:36 UTC; 14h ago
+       Docs: https://docs.netbox.dev/
+   Main PID: 1140492 (gunicorn)
+      Tasks: 19 (limit: 4683)
+     Memory: 666.2M
+     CGroup: /system.slice/netbox.service
+             ├─1140492 /opt/netbox/venv/bin/python3 /opt/netbox/venv/bin/gunicorn --pid /va>
+             ├─1140513 /opt/netbox/venv/bin/python3 /opt/netbox/venv/bin/gunicorn --pid /va>
+             ├─1140514 /opt/netbox/venv/bin/python3 /opt/netbox/venv/bin/gunicorn --pid /va>
+...
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ install python3-certbot-nginx
+
+ certbot certonly --nginx --register-unsafely-without-email
